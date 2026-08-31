@@ -1,0 +1,16 @@
+[project]
+name = "shared-infra-aws-cdk"
+version = "0.1.0"
+description = "Shared Route 53, ACM, and ALB infrastructure"
+requires-python = ">=3.11"
+dependencies = [
+    "aws-cdk-lib>=2.200.0,<3.0.0",
+    "constructs>=10.0.0,<11.0.0",
+]
+
+[dependency-groups]
+dev = ["pytest>=8.0.0,<9.0.0"]
+
+[tool.pytest.ini_options]
+testpaths = ["shared_infra/tests"]
+pythonpath = ["."]

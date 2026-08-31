@@ -1,0 +1,125 @@
+name: Validate and deploy shared infrastructure
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      deploy:
+        description: Deploy SharedInfrastructureStack after validation
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: shared-infrastructure-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: us-west-1
+  CDK_CLI_VERSION: 2.1139.0
+
+jobs:
+  cdk-test:
+    name: cdk test
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: astral-sh/setup-uv@v10.0.1
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Install dependencies
+        run: uv sync --frozen --group dev
+
+      - name: Run tests
+        run: uv run pytest -q
+
+  cdk-synth:
+    name: cdk synth
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: astral-sh/setup-uv@v10.0.1
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Install pinned CDK CLI
+        run: npm install --global "aws-cdk@$CDK_CLI_VERSION"
+
+      - name: Install dependencies
+        run: uv sync --frozen --group dev
+
+      - name: Synthesize and print template
+        run: cdk synth SharedInfrastructureStack --no-lookups
+
+  cdk-diff:
+    name: cdk diff
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v6.2.3
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - uses: astral-sh/setup-uv@v10.0.1
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Install pinned CDK CLI
+        run: npm install --global "aws-cdk@$CDK_CLI_VERSION"
+
+      - name: Install dependencies
+        run: uv sync --frozen --group dev
+
+      - name: Print CDK diff without creating a change set
+        run: cdk diff SharedInfrastructureStack --change-set=false --no-lookups
+
+  cdk-deploy:
+    name: cdk deploy (manual)
+    needs: [cdk-test, cdk-synth, cdk-diff]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: production
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v6.2.3
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - uses: astral-sh/setup-uv@v10.0.1
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Install pinned CDK CLI
+        run: npm install --global "aws-cdk@$CDK_CLI_VERSION"
+
+      - name: Install dependencies
+        run: uv sync --frozen --group dev
+
+      - name: Deploy imported shared infrastructure
+        run: cdk deploy SharedInfrastructureStack --require-approval never
