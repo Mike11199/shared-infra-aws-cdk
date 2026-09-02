@@ -3,13 +3,7 @@ name: Validate and deploy shared infrastructure
 on:
   push:
     branches: [main]
-  workflow_dispatch:
-    inputs:
-      deploy:
-        description: Deploy SharedInfrastructureStack after validation
-        required: true
-        type: boolean
-        default: false
+  workflow_dispatch: {}
 
 permissions:
   contents: read
@@ -94,7 +88,7 @@ jobs:
         run: cdk diff SharedInfrastructureStack --change-set=false --no-lookups
 
   cdk-deploy:
-    name: cdk deploy (manual)
+    name: cdk deploy
     needs: [cdk-test, cdk-synth, cdk-diff]
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -122,4 +116,4 @@ jobs:
         run: uv sync --frozen --group dev
 
       - name: Deploy imported shared infrastructure
-        run: cdk deploy SharedInfrastructureStack --require-approval never
+        run: cdk deploy SharedInfrastructureStack --revert-drift --require-approval never
