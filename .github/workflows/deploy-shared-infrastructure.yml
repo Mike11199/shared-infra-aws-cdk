@@ -127,8 +127,8 @@ jobs:
 
       - name: Deploy shared stacks
         run: |
-          cdk deploy SharedNetworkStack --revert-drift --require-approval never
-          cdk deploy SharedHostedZonesStack --revert-drift --require-approval never
-          cdk deploy SharedCertificatesStack --revert-drift --require-approval never
-          cdk deploy SharedDomainsStack --revert-drift --require-approval never
-          cdk deploy SharedInfrastructureStack --revert-drift --require-approval never
+          cdk deploy SharedNetworkStack --exclusively --revert-drift --require-approval never
+          cdk deploy SharedHostedZonesStack --exclusively --revert-drift --require-approval never
+          cdk deploy SharedCertificatesStack --exclusively --revert-drift --require-approval never
+          cdk deploy SharedDomainsStack --exclusively --revert-drift --require-approval never
+          cdk deploy SharedInfrastructureStack --exclusively --revert-drift --require-approval never
