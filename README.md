@@ -1,84 +1,87 @@
-# Shared AWS CDK Infrastructure
+# Shared AWS CDK infrastructure
 
-- This CDK deploys infrastructure shared by multiple websites in AWS.
-- Because these resources are used by more than one site, no single website should own or recreate them.
-- Each website CDK manages its own routing and application resources.
+Shared network, domain, certificate, and load-balancer infrastructure for three websites.
 
-## Domain registration
-
-- `SharedDomainsStack` does **not** register domain names.
-- The three domain names were already registered manually in Route 53 Domains. The migration imported only their hosted zones and ACM certificates into CDK; it did not import the registrations.
-- No registration or name-server action is required for the current environment.
-- In a completely new account, register or transfer the domains manually, then point them to the hosted zones created or imported for that account.
-- **Do not manually create the certificate CNAME.** ACM creates the validation CNAME automatically when the certificate stack is deployed.
-- Do not copy a validation CNAME from an old certificate. Each new certificate can receive a different CNAME.
-
-# Resources
-
-- This repository manages:
-  - Three Route 53 hosted zones
-  - Three Certificate Manager (ACM) certificates
-  - One consolidated Application Load Balancer (ALB)
-  - HTTP and HTTPS listeners
+## Ownership
 
 ```text
-SharedDomainsStack
-├── Alpine Peak hosted zone and certificate
-├── Machine Learning hosted zone and certificate
-└── Portfolio hosted zone and certificate
+SharedNetworkStack
+├── VPC
+├── two public subnets
+├── internet gateway and public routing
+└── dedicated ALB security group
+
+SharedHostedZonesStack
+└── Alpine Peak, Portfolio, and Machine Learning hosted zones
+
+SharedCertificatesStack
+└── one ACM certificate for each hosted zone
+
+SharedDomainsStack (compatibility export bridge; no domain resources)
+└── preserves the existing public hosted-zone and certificate export names
 
 SharedInfrastructureStack
-└── Consolidated Application Load Balancer
-    ├── HTTP listener :80
-    │   └── Redirects HTTP traffic to HTTPS
-    └── HTTPS listener :443
-        ├── Uses the Alpine Peak certificate by default
-        ├── Accepts application rules from each website CDK
-        └── Returns 404 when no website rule matches
+└── consolidated ALB
+    ├── HTTP-to-HTTPS listener
+    ├── HTTPS listener
+    └── all three certificate attachments
 ```
 
-- Hosted zones and certificates use `Retain` to protect them from accidental deletion.
-- Registered domains, renewals, contacts, billing, and name-server delegation remain outside CDK.
-- Route 53 creates the `NS` and `SOA` records for each hosted zone.
-- Certificate-validation CNAME records are not manual resources.
+Application repositories own their own:
 
-## Website CDKs
+- ECR `RepositoryStack`
+- Route 53 root A-alias
+- listener rule and target group
+- application security group
+- ECS application resources
 
-- Website stacks own their application-specific resources:
+Alpine Peak also defines a dedicated retained RDS security group. The database remains manually configured; attaching the new group and removing the old broad group are separate operator actions.
 
-```text
-Website CDK
-├── Root Route 53 A-alias
-├── Host-header rule on the shared HTTPS listener
-├── Target group
-└── ECS application resources
-```
+## Exports
 
-- `AlpinePeakStack` currently owns its root A-alias and listener rule.
-- The existing Portfolio and Machine Learning root A-aliases still need to be adopted by their website stacks.
+- Network: `SharedVpcId`, two public-subnet IDs and Availability Zones, and `SharedAlbSecurityGroupId`
+- Domains: dedicated owner stacks publish internal `SharedOwned<Site>...` values; the compatibility `SharedDomainsStack` re-exports the existing public `Shared<Site>HostedZoneId` and `Shared<Site>CertificateArn` names
+- Load balancer: ARN, DNS name, canonical hosted-zone ID, and `SharedHttpsListenerArn`
+
+Applications import these names. They do not contain production VPC, subnet, security-group, listener, account, or region IDs.
 
 ## Deployment order
 
 ```text
-SharedDomainsStack
--> SharedInfrastructureStack
--> Website stacks
+SharedNetworkStack
+SharedHostedZonesStack
+  -> SharedCertificatesStack
+  -> SharedDomainsStack export bridge
+SharedNetworkStack + SharedDomainsStack export bridge
+  -> SharedInfrastructureStack
+  -> application RepositoryStacks
+  -> image pushes
+  -> application stacks
 ```
 
-- `SharedInfrastructureStack` consumes certificate outputs from `SharedDomainsStack`.
-- Website stacks consume hosted-zone, load-balancer, and listener outputs from the shared stacks.
+The order above applies to new environments and routine deployments. The current account completed the retained-resource migration recorded in [MIGRATION_README.md](MIGRATION_README.md).
 
-## Rebuilding in a new environment
+## Domain registration
 
-- The current certificate definitions use production hosted-zone IDs.
-- Before rebuilding in a new environment, separate hosted zones and certificates into ordered stacks and use `hosted_zone.ref`.
-- Deploy hosted zones first, update the registered domains' name servers, and then deploy certificates.
-- When the certificate stack is deployed, ACM automatically creates the validation CNAMEs in those hosted zones.
+- CDK does not register or transfer domains.
+- In a new account, update each registered domain to the name servers created by its hosted zone.
+- ACM creates validation CNAMEs automatically after hosted-zone delegation is correct.
+- Never copy validation CNAMEs from an old certificate.
 
-## File responsibilities
+## Deployment safeguards
 
-- `app.py` creates the shared domain and infrastructure stacks in dependency order.
-- `shared_infra/domains_stack.py` defines hosted zones, certificates, retention policies, and exports.
-- `shared_infra/stack.py` defines the shared load balancer, listeners, and exports.
-- `shared_infra/config.py` contains the existing AWS resource identifiers and domain configuration.
-- `shared_infra/tests/` verifies resource ownership, stable logical IDs, and listener behavior.
+- The migration completed with all eleven stacks `IN_SYNC` and zero final CDK differences.
+- Hosted zones, certificates, imported network resources, the ALB, listeners, certificate attachments, ECR repositories, DNS aliases, listener rules, target groups, and the Alpine RDS security group use `Retain` where loss would be unsafe.
+- Use normal `app.py` deployments. One-time migration programs and physical-resource maps were removed after verification.
+- Reject unexpected deletion or replacement of retained production resources.
+
+## Files
+
+- `app.py` creates the owner stacks, compatibility export bridge, and one-way dependencies.
+- `shared_infra/domain_exports_stack.py` keeps those public export names stable after ownership moves.
+- `shared_infra/network_stack.py` owns shared networking and the ALB security group.
+- `shared_infra/hosted_zones_stack.py` owns hosted zones.
+- `shared_infra/certificates_stack.py` owns certificates and consumes hosted-zone exports.
+- `shared_infra/stack.py` owns the ALB, listeners, and certificate attachments.
+- `shared_infra/config.py` contains portable names and CIDR ranges only.
+- `shared_infra/tests/` verifies ownership, retention, exports, and dependencies.

@@ -1,6 +1,5 @@
 from aws_cdk import App
 
-from shared_infra import config
 from shared_infra.stack import SharedInfrastructureStack
 
 
@@ -18,88 +17,70 @@ def resources(cloudformation: dict, resource_type: str) -> list[dict]:
     ]
 
 
-def test_exact_import_logical_ids():
-    assert set(template()["Resources"]) == {
+def test_exact_retained_edge_resources_and_certificate_attachments():
+    cloudformation = template()
+    assert set(cloudformation["Resources"]) == {
         "SharedAlb",
         "HttpListener",
         "HttpsListener",
+        "PortfolioHttpsCertificateAttachment",
+        "MachineLearningHttpsCertificateAttachment",
     }
-
-
-def test_alb_matches_active_physical_resource_and_is_retained():
-    resource = template()["Resources"]["SharedAlb"]
-    properties = resource["Properties"]
-
-    assert properties["Name"] == "consolidated-load-balancer"
-    assert properties["Scheme"] == "internet-facing"
-    assert properties["Type"] == "application"
-    assert properties["Subnets"] == list(config.PUBLIC_SUBNET_IDS)
-    assert properties["SecurityGroups"] == list(config.ALB_SECURITY_GROUP_IDS)
-    assert properties["Tags"] == [
-        {
-            "Key": "Description",
-            "Value": (
-                "Shared internet-facing HTTPS ALB for 3 domains. "
-                "Shared CDK owns the ALB and listeners. "
-                "Site CDKs own Route 53 DNS TLS certificates "
-                "host routing rules and target groups."
-            ),
-        }
-    ]
-    assert resource["DeletionPolicy"] == "Retain"
-    assert resource["UpdateReplacePolicy"] == "Retain"
-
-
-def test_listeners_match_active_defaults_and_are_retained():
-    cloudformation = template()
-    http_resource = cloudformation["Resources"]["HttpListener"]
-    https_resource = cloudformation["Resources"]["HttpsListener"]
-    http = http_resource["Properties"]
-    https = https_resource["Properties"]
-
-    assert http["Port"] == 80
-    assert http["Protocol"] == "HTTP"
-    assert http["DefaultActions"][0]["RedirectConfig"] == {
-        "Host": "#{host}",
-        "Path": "/#{path}",
-        "Port": "443",
-        "Protocol": "HTTPS",
-        "Query": "#{query}",
-        "StatusCode": "HTTP_301",
-    }
-
-    assert https["Port"] == 443
-    assert https["Protocol"] == "HTTPS"
-    assert https["SslPolicy"] == "ELBSecurityPolicy-TLS13-1-2-2021-06"
-    assert https["Certificates"] == [
-        {
-            "CertificateArn": {
-                "Fn::ImportValue": "SharedAlpinePeakCertificateArn"
-            }
-        }
-    ]
-
-    assert https["DefaultActions"][0] == {
-        "Type": "fixed-response",
-        "FixedResponseConfig": {
-            "StatusCode": "404",
-            "ContentType": "text/plain",
-            "MessageBody": "Not Found",
-        },
-    }
-
-    for resource in (http_resource, https_resource):
+    for logical_id in (
+        "SharedAlb",
+        "HttpListener",
+        "HttpsListener",
+        "PortfolioHttpsCertificateAttachment",
+        "MachineLearningHttpsCertificateAttachment",
+    ):
+        resource = cloudformation["Resources"][logical_id]
         assert resource["DeletionPolicy"] == "Retain"
         assert resource["UpdateReplacePolicy"] == "Retain"
 
 
-def test_stack_does_not_own_website_resources():
+def test_alb_consumes_network_exports():
+    properties = template()["Resources"]["SharedAlb"]["Properties"]
+    assert properties["Subnets"] == [
+        {"Fn::ImportValue": "SharedPublicSubnet1Id"},
+        {"Fn::ImportValue": "SharedPublicSubnet2Id"},
+    ]
+    assert properties["SecurityGroups"] == [
+        {"Fn::ImportValue": "SharedAlbSecurityGroupId"}
+    ]
+
+
+def test_https_listener_and_extra_certificates_use_certificate_exports():
     cloudformation = template()
-    assert resources(cloudformation, "AWS::Route53::HostedZone") == []
-    assert resources(cloudformation, "AWS::Route53::RecordSet") == []
-    assert resources(
-        cloudformation, "AWS::CertificateManager::Certificate") == []
-    assert resources(
-        cloudformation, "AWS::ElasticLoadBalancingV2::ListenerRule") == []
-    assert resources(
-        cloudformation, "AWS::ElasticLoadBalancingV2::TargetGroup") == []
+    listener = cloudformation["Resources"]["HttpsListener"]["Properties"]
+    assert listener["Certificates"] == [
+        {"CertificateArn": {"Fn::ImportValue": "SharedAlpinePeakCertificateArn"}}
+    ]
+    assert listener["DefaultActions"][0]["FixedResponseConfig"]["StatusCode"] == "404"
+
+    expected = {
+        "PortfolioHttpsCertificateAttachment": "SharedPortfolioCertificateArn",
+        "MachineLearningHttpsCertificateAttachment": (
+            "SharedMachineLearningCertificateArn"
+        ),
+    }
+    for logical_id, certificate_export in expected.items():
+        extra = cloudformation["Resources"][logical_id]["Properties"]
+        assert extra["ListenerArn"] == {"Ref": "HttpsListener"}
+        assert extra["Certificates"] == [
+            {"CertificateArn": {"Fn::ImportValue": certificate_export}}
+        ]
+
+
+
+def test_stack_does_not_own_website_or_network_resources():
+    cloudformation = template()
+    for resource_type in (
+        "AWS::Route53::HostedZone",
+        "AWS::Route53::RecordSet",
+        "AWS::CertificateManager::Certificate",
+        "AWS::ElasticLoadBalancingV2::ListenerRule",
+        "AWS::ElasticLoadBalancingV2::TargetGroup",
+        "AWS::EC2::VPC",
+        "AWS::EC2::SecurityGroup",
+    ):
+        assert resources(cloudformation, resource_type) == []

@@ -13,7 +13,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  AWS_REGION: us-west-1
+  AWS_REGION: ${{ vars.AWS_REGION }}
   CDK_CLI_VERSION: 2.1139.0
 
 jobs:
@@ -55,8 +55,13 @@ jobs:
       - name: Install dependencies
         run: uv sync --frozen --group dev
 
-      - name: Synthesize and print template
-        run: cdk synth SharedInfrastructureStack --no-lookups
+      - name: Synthesize and print templates
+        run: |
+          cdk synth SharedNetworkStack --no-lookups
+          cdk synth SharedHostedZonesStack --no-lookups
+          cdk synth SharedCertificatesStack --no-lookups
+          cdk synth SharedDomainsStack --no-lookups
+          cdk synth SharedInfrastructureStack --no-lookups
 
   cdk-diff:
     name: cdk diff
@@ -84,8 +89,13 @@ jobs:
       - name: Install dependencies
         run: uv sync --frozen --group dev
 
-      - name: Print CDK diff without creating a change set
-        run: cdk diff SharedInfrastructureStack --change-set=false --no-lookups
+      - name: Print CDK diffs without creating change sets
+        run: |
+          cdk diff SharedNetworkStack --change-set=false --no-lookups
+          cdk diff SharedHostedZonesStack --change-set=false --no-lookups
+          cdk diff SharedCertificatesStack --change-set=false --no-lookups
+          cdk diff SharedDomainsStack --change-set=false --no-lookups
+          cdk diff SharedInfrastructureStack --change-set=false --no-lookups
 
   cdk-deploy:
     name: cdk deploy
@@ -115,5 +125,10 @@ jobs:
       - name: Install dependencies
         run: uv sync --frozen --group dev
 
-      - name: Deploy imported shared infrastructure
-        run: cdk deploy SharedInfrastructureStack --revert-drift --require-approval never
+      - name: Deploy shared stacks
+        run: |
+          cdk deploy SharedNetworkStack --revert-drift --require-approval never
+          cdk deploy SharedHostedZonesStack --revert-drift --require-approval never
+          cdk deploy SharedCertificatesStack --revert-drift --require-approval never
+          cdk deploy SharedDomainsStack --revert-drift --require-approval never
+          cdk deploy SharedInfrastructureStack --revert-drift --require-approval never

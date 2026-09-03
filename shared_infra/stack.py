@@ -1,13 +1,10 @@
-"""Shared consolidated load balancer and listener ownership.
+"""Own the shared public web entry point used by all three websites.
 
-SharedInfrastructureStack owns the ALB and its HTTP/HTTPS listeners. It does
-not own any website's root Route 53 A-alias record. Final ownership belongs in
-each application stack because the alias is the application-specific route to
-the shared ALB and shares the website lifecycle. Alpine Peak owns its alias
-now; the live Portfolio and Machine Learning aliases remain unmanaged until
-their separate application-CDK migration stages. SharedDomainsStack owns the
-hosted zones and ACM certificates so a fresh environment has the one-way order
-domains -> listener -> websites.
+This stack creates the shared load balancer (ALB), the connections accepting HTTP
+and HTTPS traffic (listeners), and the extra certificate attachments. It does not
+own each site's DNS alias, routing rule, or destination group; those belong to the
+site's application stack. This boundary keeps the dependency order one-way:
+network -> domains -> shared web entry point -> applications.
 """
 
 from aws_cdk import CfnOutput, CfnTag, Fn, RemovalPolicy, Stack
@@ -18,7 +15,12 @@ from . import config
 
 
 class SharedInfrastructureStack(Stack):
-    def __init__(self, scope: Construct, construct_id: str, **kwargs) -> None:
+    def __init__(
+        self,
+        scope: Construct,
+        construct_id: str,
+        **kwargs: object,
+    ) -> None:
         super().__init__(scope, construct_id, **kwargs)
 
         load_balancer = elbv2.CfnLoadBalancer(
@@ -28,16 +30,18 @@ class SharedInfrastructureStack(Stack):
             type="application",
             scheme="internet-facing",
             ip_address_type="ipv4",
-            subnets=list(config.PUBLIC_SUBNET_IDS),
-            security_groups=list(config.ALB_SECURITY_GROUP_IDS),
+            subnets=[
+                Fn.import_value("SharedPublicSubnet1Id"),
+                Fn.import_value("SharedPublicSubnet2Id"),
+            ],
+            security_groups=[Fn.import_value("SharedAlbSecurityGroupId")],
             tags=[
                 CfnTag(
                     key="Description",
                     value=(
-                        "Shared internet-facing HTTPS ALB for 3 domains. "
-                        "Shared CDK owns the ALB and listeners. "
-                        "Site CDKs own Route 53 DNS TLS certificates "
-                        "host routing rules and target groups."
+                        "Shared CDK owns the network ALB listeners and TLS "
+                        "certificates. Site CDKs own DNS aliases host routing "
+                        "rules target groups and application services."
                     ),
                 )
             ],
@@ -80,9 +84,9 @@ class SharedInfrastructureStack(Stack):
         http_listener.override_logical_id("HttpListener")
         http_listener.apply_removal_policy(RemovalPolicy.RETAIN)
 
-        # The listener requires one default certificate. SharedDomainsStack owns
-        # the Alpine Peak certificate and exports its ARN, creating the intended
-        # one-way domains -> listener dependency for a fresh environment.
+        # The listener requires one default certificate. SharedCertificatesStack
+        # owns the Alpine Peak certificate and exports its ARN, creating the
+        # intended one-way certificates -> listener dependency.
         https_listener = elbv2.CfnListener(
             self,
             "HttpsListenerResource",
@@ -113,6 +117,24 @@ class SharedInfrastructureStack(Stack):
         )
         https_listener.override_logical_id("HttpsListener")
         https_listener.apply_removal_policy(RemovalPolicy.RETAIN)
+
+        for resource_id in ("Portfolio", "MachineLearning"):
+            attachment = elbv2.CfnListenerCertificate(
+                self,
+                f"{resource_id}HttpsCertificateAttachmentResource",
+                listener_arn=https_listener.ref,
+                certificates=[
+                    elbv2.CfnListenerCertificate.CertificateProperty(
+                        certificate_arn=Fn.import_value(
+                            f"Shared{resource_id}CertificateArn"
+                        )
+                    )
+                ],
+            )
+            attachment.override_logical_id(
+                f"{resource_id}HttpsCertificateAttachment"
+            )
+            attachment.apply_removal_policy(RemovalPolicy.RETAIN)
 
         CfnOutput(
             self,
