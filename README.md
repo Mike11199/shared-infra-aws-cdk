@@ -7,6 +7,8 @@ Shared infrastructure used by three websites:
 - ACM certificates - the website identities used to encrypt HTTPS traffic
 - Application Load Balancer (ALB) - the public entry point that sends each request to the correct website
 
+![CloudFormation stacks](readme_images/cloudformation_stacks.png)
+
 These resources are defined here once because all three websites depend on them and no single application should recreate them. Keeping them in dedicated shared stacks prevents an application deployment from accidentally replacing production networking, domains, certificates, or the load balancer.
 
 It also lets the same environment be built in a fresh AWS account without copying resource identifiers from production.
