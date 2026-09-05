@@ -46,7 +46,7 @@ Application repositories own their own:
 - application security group
 - ECS application resources
 
-Each application has its own GitHub Actions workflow, and its application-stack deployment uses `cdk deploy --revert-drift` to restore the code-defined configuration when a live AWS resource has been changed manually.
+Each application has its own GitHub Actions workflow. Routine deployments apply template changes without automatic drift repair; review and resolve manual AWS resource changes separately.
 
 Alpine Peak (ski shop) also defines a dedicated retained RDS security group. The database remains manually configured; attaching the new group and removing the old broad group are separate actions.
 
